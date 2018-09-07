@@ -1,4 +1,4 @@
-// -*- mode: groovy -*-
+
 
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
@@ -30,6 +30,7 @@ mx_cmake_lib = 'build/libmxnet.so, build/libmxnet.a, build/3rdparty/dmlc-core/li
 mx_cmake_lib_debug = 'build/libmxnet.so, build/libmxnet.a, build/3rdparty/dmlc-core/libdmlc.a, build/tests/mxnet_unit_tests'
 mx_cmake_mkldnn_lib = 'build/libmxnet.so, build/libmxnet.a, build/3rdparty/dmlc-core/libdmlc.a, build/tests/mxnet_unit_tests, build/3rdparty/openmp/runtime/src/libomp.so, build/3rdparty/mkldnn/src/libmkldnn.so.0'
 mx_mkldnn_lib = 'lib/libmxnet.so, lib/libmxnet.a, lib/libiomp5.so, lib/libmkldnn.so.0, lib/libmklml_intel.so, 3rdparty/dmlc-core/libdmlc.a, 3rdparty/tvm/nnvm/lib/libnnvm.a'
+mx_ngraph_lib = 'lib/libmxnet.so, lib/libmxnet.a, lib/libiomp5.so, lib/libmkldnn.so.0, lib/libmklml_intel.so, lib/libcpu_backend.so.0.8, lib/libngraph.so.0.8, lib/libtbb.so.2, 3rdparty/dmlc-core/libdmlc.a, 3rdparty/tvm/nnvm/lib/libnnvm.a'
 mx_tensorrt_lib = 'lib/libmxnet.so, lib/libnvonnxparser_runtime.so.0, lib/libnvonnxparser.so.0, lib/libonnx_proto.so, lib/libonnx.so'
 mx_lib_cpp_examples = 'lib/libmxnet.so, lib/libmxnet.a, 3rdparty/dmlc-core/libdmlc.a, 3rdparty/tvm/nnvm/lib/libnnvm.a, 3rdparty/ps-lite/build/libps.a, deps/lib/libprotobuf-lite.a, deps/lib/libzmq.a, build/cpp-package/example/lenet, build/cpp-package/example/alexnet, build/cpp-package/example/googlenet, build/cpp-package/example/lenet_with_mxdataiter, build/cpp-package/example/resnet, build/cpp-package/example/mlp, build/cpp-package/example/mlp_cpu, build/cpp-package/example/mlp_gpu, build/cpp-package/example/test_score, build/cpp-package/example/test_optimizer'
 mx_lib_cpp_examples_cpu = 'build/libmxnet.so, build/cpp-package/example/mlp_cpu'
@@ -267,6 +268,17 @@ core_logic: {
             utils.init_git()
             utils.docker_run('ubuntu_cpu', 'build_ubuntu_cpu_mkldnn', false)
             utils.pack_lib('mkldnn_cpu', mx_mkldnn_lib, true)
+          }
+        }
+      }
+    },
+    'CPU: NGRAPH': {
+      node(NODE_LINUX_CPU) {
+        ws('workspace/build-ngraph-cpu') {
+          timeout(time: max_time, unit: 'MINUTES') {
+            utils.init_git()
+            utils.docker_run('ubuntu_cpu', 'build_ubuntu_cpu_ngraph', false)
+            utils.pack_lib('ngraph_cpu', mx_ngraph_lib, true)
           }
         }
       }
@@ -677,6 +689,21 @@ core_logic: {
               utils.publish_test_coverage()
             } finally {
               utils.collect_test_results_unix('nosetests_tensorrt.xml', 'nosetests_python3_tensorrt_gpu.xml')
+            }
+          }
+        }
+      }
+    },
+    'Python3: nGraph CPU': {
+      node(NODE_LINUX_CPU) {
+        ws('workspace/build-ngraph-cpu') {
+          timeout(time: max_time, unit: 'MINUTES') {
+            try {
+              utils.unpack_and_init('ngraph_cpu', mx_ngraph_lib, true)
+              utils.docker_run('ubuntu_cpu', 'unittest_ubuntu_cpu_ngraph', false)
+              utils.publish_test_coverage()
+            } finally {
+              utils.collect_test_results_unix('nosetests_unittest.xml', 'nosetests_python3_ngraph_cpu.xml')
             }
           }
         }
