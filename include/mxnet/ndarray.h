@@ -760,8 +760,9 @@ class NDArray {
 #endif
 
 #if MXNET_USE_NGRAPH == 1
-    // create and return tensor_view with this ndarray mem
-    std::shared_ptr<ngraph::runtime::TensorView> create_tensor_view();
+  // create and return tensor_view with this ndarray mem
+  std::shared_ptr<ngraph::runtime::Tensor> &create_tensor(bool is_boolean,
+                                                          bool is_scalar);
 #endif
 
   /*!
@@ -807,7 +808,7 @@ class NDArray {
 #if MXNET_USE_NGRAPH == 1
     /*! this is set if ngraph tensorview is associated with this ndarray
      */
-    std::shared_ptr<ngraph::runtime::TensorView> tensor_view_;
+    std::shared_ptr<ngraph::runtime::Tensor> tensor_view_;
 #endif
     /*! \brief variable from engine */
     Engine::VarHandle var;

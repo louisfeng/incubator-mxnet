@@ -28,6 +28,7 @@
 #include <ngraph_graph.h>
 #include <ngraph_imperative.h>
 #include <ngraph_nnvm_ops.h>
+#include <ngraph_sgcompiler_utils.h>
 
 #include "../subgraph/common.h"
 #include "../subgraph/subgraph_property.h"
@@ -106,6 +107,11 @@ std::vector<nnvm::NodeEntry> NgraphSubgraphGradient(
       zero_grad && graph->num_outputs_ == 1) {
     return mxnet::op::MakeZeroGradNodes(n, ograds);
   }
+  if (!graph->need_grad) {
+    LOG(FATAL)
+        << "NGRAPH_BRIDGE: This graph was compiled as inference but "
+        << "is called in training";
+  }
   p->attrs.name = n->attrs.name + "_backward";
   p->attrs.dict = n->attrs.dict;
   p->control_deps.emplace_back(n);
@@ -113,13 +119,17 @@ std::vector<nnvm::NodeEntry> NgraphSubgraphGradient(
     p->op()->attr_parser(&(p->attrs));
   }
   if (!zero_grad) {
-    for (size_t i = 0; i < ograds.size(); ++i) {
+    for (size_t i = 0; i < graph->num_adjoints_; ++i) {
       if (!is_loss[i]) {
         p->inputs.push_back(ograds[i]);
       }
     }
   }
   p->inputs.insert(p->inputs.end(), n->inputs.begin(), n->inputs.end());
+  for (unsigned i = graph->outputs_.size();
+       i < graph->fprop_cache->fprop->get_results().size(); ++i) {
+    p->inputs.emplace_back(nnvm::NodeEntry{n, i, 0});
+  }
   std::vector<nnvm::NodeEntry> ret;
   for (unsigned i = 0; i < p->num_outputs(); ++i) {
     ret.emplace_back(nnvm::NodeEntry{p, i, 0});
@@ -159,11 +169,12 @@ bool NgraphSubgraphInferShape(const nnvm::NodeAttrs &attrs,
   for (size_t i = 0; i < graph->inputs_.size(); ++i) {
     (*in_attrs)[i] = graph->inputs_[i]->shape_;
   }
-  std::vector<nnvm::TShape> shapes;
-  for (auto output : graph->outputs_) {
-    shapes.push_back(output->shape_);
+  size_t i = 0;
+  for (const auto& output : graph->get_results()) {
+    auto tmp_shape = ngraph_bridge::NShape_to_TShape(output->get_shape());
+    (*out_attrs)[i] = tmp_shape;
+    i += 1;
   }
-  (*out_attrs) = shapes;
   return true;
 }
 bool NgraphSubgraphInferType(const nnvm::NodeAttrs &attrs,
@@ -173,14 +184,15 @@ bool NgraphSubgraphInferType(const nnvm::NodeAttrs &attrs,
     (*iattr)[i] = graph->inputs_[i]->dtype_;
   }
   std::vector<int> dtypes;
-  for (auto output : graph->outputs_) {
-    dtypes.push_back(output->dtype_);
+  for (const auto& output : graph->get_results()) {
+    dtypes.push_back(ngraph_bridge::getType(output->get_element_type()));
   }
   for (size_t i = 0; i < dtypes.size(); ++i) {
     mxnet::op::type_assign(&((*oattr)[i]), dtypes[i]);
   }
   return true;
 }
+
 bool NgraphSubgraphInferStorageType(const nnvm::NodeAttrs &attrs,
                                     const int dev_mask,
                                     mxnet::DispatchMode *dispatch_mode,
@@ -227,8 +239,13 @@ NNVM_REGISTER_OP(_ngraph_subgraph_op)
     })
     .set_num_outputs([](const NodeAttrs &attrs) {
       auto graph = get_ngraph(attrs);
-      return graph->outputs_.size();
+      return graph->get_results().size();
     })
+    .set_attr<nnvm::FNumVisibleOutputs>("FNumVisibleOutputs",
+                                        [](const NodeAttrs& attrs) {
+                                          auto graph = get_ngraph(attrs);
+                                          return graph->outputs_.size();
+                                        })
     .set_attr<nnvm::FListInputNames>("FListInputNames",
                                      NgraphSubgraphListInputNames)
     .set_attr<nnvm::FListOutputNames>("FListOutputNames",
@@ -248,11 +265,13 @@ NNVM_REGISTER_OP(_ngraph_subgraph_op)
 NNVM_REGISTER_OP(_backward_ngraph_subgraph_op)
     .set_num_inputs([](const NodeAttrs &attrs) {
       auto graph = get_ngraph(attrs);
-      return graph->num_adjoints_ + graph->inputs_.size();
+      int mode = static_cast<int>(ngraph_bridge::GraphExeMode::kTrain);
+      return graph->fprop_cache->bprop->get_parameters().size() +
+             graph->cached_aux_positions[mode].size();
     })
     .set_num_outputs([](const NodeAttrs &attrs) {
       auto graph = get_ngraph(attrs);
-      return graph->inputs_.size();
+      return graph->fprop_cache->bprop->get_results().size();
     })
     .set_attr<bool>("TIsBackward", true)
     .set_attr<bool>("TIsLayerOpBackward", true)
